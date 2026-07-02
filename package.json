@@ -1,0 +1,26 @@
+{
+  "name": "visagent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "可视化 Agent 工作流编排平台 - Visual Agent Workflow Orchestration Platform",
+  "scripts": {
+    "dev": "concurrently \"pnpm --filter @visagent/server dev\" \"pnpm --filter @visagent/client dev\"",
+    "dev:client": "pnpm --filter @visagent/client dev",
+    "dev:server": "pnpm --filter @visagent/server dev",
+    "build": "pnpm --filter @visagent/shared build && pnpm -r --filter !@visagent/shared build",
+    "build:client": "pnpm --filter @visagent/client build",
+    "build:server": "pnpm --filter @visagent/server build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "clean": "pnpm -r exec rm -rf dist node_modules"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.4",
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.0"
+  }
+}
