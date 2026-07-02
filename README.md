@@ -97,11 +97,11 @@
 - [x] 动态参数注入——`$ref.nodeId.field` 上下文引用 + `{{expression}}` 表达式求值 + JSON 参数解析
 - [x] 沙箱代码执行——上下文隔离（仅暴露安全全局对象）+ 超时保护 + 严格模式
 
-### Phase 6 — 持久化 & 打磨
-- [ ] 执行历史查询与回溯
-- [ ] 工作流版本管理
-- [ ] 错误处理与重试策略
-- [ ] UI/UX 打磨
+### Phase 6 — 持久化 & 打磨 ✅ (已完成)
+- [x] 执行历史查询与回溯——ExecutionHistoryPanel 展示历史记录，点击展开节点详情
+- [x] 工作流版本管理——每次保存自动归档旧版本到 `workflow_versions` 表，API `GET /workflows/:id/versions`
+- [x] 错误处理——全局 Toast 通知系统替换所有 `alert()`，success/error/info/warning 四级
+- [x] UI/UX 打磨——空画布引导提示 + 键盘快捷键提示（Ctrl+Z/Ctrl+Shift+Z/Del）
 
 ---
 

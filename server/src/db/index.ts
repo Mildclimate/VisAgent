@@ -57,6 +57,18 @@ export function initDatabase(): void {
 
     CREATE INDEX IF NOT EXISTS idx_executions_status
       ON executions(status);
+
+    CREATE TABLE IF NOT EXISTS workflow_versions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      workflow_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      definition TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_versions_workflow_id
+      ON workflow_versions(workflow_id, version DESC);
   `);
 
   console.log('[DB] Database initialized successfully');

@@ -67,6 +67,12 @@ workflowRouter.put('/:id', (req: Request, res: Response) => {
   const now = new Date().toISOString();
   const newVersion = existing.version + 1;
 
+  // Archive current version
+  db.prepare(`
+    INSERT INTO workflow_versions (workflow_id, version, definition)
+    VALUES (?, ?, ?)
+  `).run(existing.id, existing.version, existing.definition);
+
   const wf: WorkflowDefinition = {
     id: existing.id,
     name: name || existing.name,
@@ -83,6 +89,16 @@ workflowRouter.put('/:id', (req: Request, res: Response) => {
   `).run(wf.name, wf.description || '', newVersion, JSON.stringify(wf), now, existing.id);
 
   res.json(wf);
+});
+
+/** Get version history for a workflow */
+workflowRouter.get('/:id/versions', (req: Request, res: Response) => {
+  const rows = db.prepare(`
+    SELECT id, version, created_at FROM workflow_versions
+    WHERE workflow_id = ?
+    ORDER BY version DESC
+  `).all(req.params.id);
+  res.json(rows);
 });
 
 /** Delete a workflow */

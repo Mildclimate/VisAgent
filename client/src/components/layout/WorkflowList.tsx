@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { X, FileText, Plus, Trash2, Download, Save } from 'lucide-react';
 import { useWorkflowStore } from '../../stores/workflowStore';
+import { useToastStore } from '../../stores/toastStore';
 import { api } from '../../lib/api';
 
 export default function WorkflowList() {
@@ -16,6 +17,7 @@ export default function WorkflowList() {
     isDirty,
     markClean,
   } = useWorkflowStore();
+  const addToast = useToastStore((s) => s.addToast);
 
   // Load workflow list when opened
   useEffect(() => {
@@ -46,11 +48,12 @@ export default function WorkflowList() {
         setWorkflow({ ...created });
       }
       markClean();
+      addToast('success', workflow?.id ? 'Workflow updated' : 'Workflow created');
       // Refresh list
       const list = await api.getWorkflows();
       setWorkflowList(list);
     } catch (err: any) {
-      alert(`Save failed: ${err.message}`);
+      addToast('error', `Save failed: ${err.message}`);
     }
   };
 
@@ -59,8 +62,9 @@ export default function WorkflowList() {
       const wf = await api.getWorkflow(id);
       setWorkflow(wf);
       setShowWorkflowList(false);
+      addToast('info', `Loaded: ${wf.name}`);
     } catch (err: any) {
-      alert(`Load failed: ${err.message}`);
+      addToast('error', `Load failed: ${err.message}`);
     }
   };
 
@@ -68,13 +72,14 @@ export default function WorkflowList() {
     if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
     try {
       await api.deleteWorkflow(id);
+      addToast('success', `Deleted: ${name}`);
       const list = await api.getWorkflows();
       setWorkflowList(list);
       if (workflow?.id === id) {
         setWorkflow({ id: '', name: 'Untitled Workflow', version: 1, nodes: [], edges: [], variables: {}, createdAt: '', updatedAt: '' });
       }
     } catch (err: any) {
-      alert(`Delete failed: ${err.message}`);
+      addToast('error', `Delete failed: ${err.message}`);
     }
   };
 

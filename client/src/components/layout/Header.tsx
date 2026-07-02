@@ -1,9 +1,10 @@
-import { Save, Play, Monitor, Wrench } from 'lucide-react';
+import { Save, Play, Monitor, Wrench, History } from 'lucide-react';
 import { useWorkflowStore } from '../../stores/workflowStore';
 import { useWebSocket } from '../../hooks/useWebSocket';
+import { useToastStore } from '../../stores/toastStore';
 import { api } from '../../lib/api';
 
-type RightPanel = 'monitor' | 'tools' | null;
+type RightPanel = 'monitor' | 'tools' | 'history' | null;
 
 interface HeaderProps {
   workflowName: string;
@@ -15,9 +16,9 @@ interface HeaderProps {
 export default function Header({ workflowName, onNameChange, rightPanel, onTogglePanel }: HeaderProps) {
   const { workflow, isDirty, nodes, edges, setWorkflow, markClean, setShowWorkflowList } = useWorkflowStore();
   const { startExecution } = useWebSocket();
+  const addToast = useToastStore((s) => s.addToast);
 
   const handleRun = async () => {
-    // Auto-save before running so the workflow has an ID
     let wfId = workflow?.id;
     if (!wfId || isDirty) {
       try {
@@ -34,13 +35,13 @@ export default function Header({ workflowName, onNameChange, rightPanel, onToggl
           setWorkflow({ ...created });
         }
         markClean();
+        addToast('success', 'Workflow saved');
       } catch (err: any) {
-        alert(`Save before run failed: ${err.message}`);
+        addToast('error', `Save failed: ${err.message}`);
         return;
       }
     }
 
-    // Collect input from start node config
     const inputs: Record<string, unknown> = {};
     const startNode = nodes.find((n: any) => n.type === 'start');
     if (startNode?.data?.config && 'inputSchema' in startNode.data.config) {
@@ -50,6 +51,7 @@ export default function Header({ workflowName, onNameChange, rightPanel, onToggl
     }
 
     startExecution(wfId!, inputs);
+    addToast('info', 'Execution started — check Monitor panel');
   };
 
   return (
@@ -120,6 +122,18 @@ export default function Header({ workflowName, onNameChange, rightPanel, onToggl
       >
         <Wrench size={15} />
         <span>Tools</span>
+      </button>
+
+      <button
+        onClick={() => onTogglePanel('history')}
+        className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition-colors ${
+          rightPanel === 'history'
+            ? 'bg-primary-600/20 text-primary-400'
+            : 'hover:bg-surface-700 text-surface-300 hover:text-white'
+        }`}
+      >
+        <History size={15} />
+        <span>History</span>
       </button>
     </header>
   );

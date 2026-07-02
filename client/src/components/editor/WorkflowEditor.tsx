@@ -213,6 +213,23 @@ export default function WorkflowEditor() {
         </button>
       </div>
 
+      {/* Empty state hint */}
+      {nodes.length === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
+          <div className="text-center">
+            <p className="text-surface-400 text-lg font-medium mb-2">Drop a node to get started</p>
+            <p className="text-surface-600 text-sm">
+              Drag nodes from the left palette onto this canvas
+            </p>
+            <div className="mt-4 flex justify-center gap-4 text-[11px] text-surface-600">
+              <span><kbd className="px-1.5 py-0.5 rounded bg-surface-700 text-surface-400 text-[10px]">Ctrl+Z</kbd> Undo</span>
+              <span><kbd className="px-1.5 py-0.5 rounded bg-surface-700 text-surface-400 text-[10px]">Ctrl+Shift+Z</kbd> Redo</span>
+              <span><kbd className="px-1.5 py-0.5 rounded bg-surface-700 text-surface-400 text-[10px]">Del</kbd> Delete</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       <ReactFlow
         nodes={nodes}
         edges={edges}

@@ -5,10 +5,12 @@ import Header from './components/layout/Header';
 import Sidebar from './components/layout/Sidebar';
 import WorkflowEditor from './components/editor/WorkflowEditor';
 import WorkflowList from './components/layout/WorkflowList';
+import ToastContainer from './components/layout/ToastContainer';
 import MonitorPanel from './components/monitor/MonitorPanel';
+import ExecutionHistoryPanel from './components/monitor/ExecutionHistoryPanel';
 import ToolManager from './components/toolbox/ToolManager';
 
-type RightPanel = 'monitor' | 'tools' | null;
+type RightPanel = 'monitor' | 'tools' | 'history' | null;
 
 export default function App() {
   const [rightPanel, setRightPanel] = useState<RightPanel>(null);
@@ -40,12 +42,16 @@ export default function App() {
           <div className="w-96 border-l border-surface-700 bg-surface-800 overflow-y-auto">
             {rightPanel === 'monitor' && <MonitorPanel />}
             {rightPanel === 'tools' && <ToolManager />}
+            {rightPanel === 'history' && <ExecutionHistoryPanel />}
           </div>
         )}
       </div>
 
       {/* Workflow save/load dialog */}
       <WorkflowList />
+
+      {/* Toast notifications */}
+      <ToastContainer />
     </div>
   );
 }
