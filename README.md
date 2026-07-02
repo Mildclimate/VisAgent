@@ -116,7 +116,7 @@
 
 ```bash
 # 克隆仓库
-git clone <repo-url>
+git clone https://github.com/Mildclimate/VisAgent
 cd VisAgent
 
 # 安装依赖
