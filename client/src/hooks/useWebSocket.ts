@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useExecutionStore } from '../stores/executionStore';
+import { useWorkflowStore } from '../stores/workflowStore';
 import type { WsServerEvent } from '@visagent/shared';
 
 const SOCKET_URL = ''; // Same origin, proxied by Vite
@@ -26,6 +27,17 @@ export function useWebSocket() {
     addLog,
   } = useExecutionStore();
 
+  /** Sync execution node status to canvas nodes for visual feedback */
+  const syncNodeStatus = (nodeId: string, status: string) => {
+    const { nodes, updateNode } = useWorkflowStore.getState();
+    const node = nodes.find((n) => n.id === nodeId);
+    if (node) {
+      updateNode(nodeId, {
+        data: { ...node.data, status },
+      } as any);
+    }
+  };
+
   useEffect(() => {
     const socket = socketRef.current;
 
@@ -34,6 +46,11 @@ export function useWebSocket() {
         case 'execution:started':
           updateExecution(event.execution.executionId, event.execution);
           setActiveExecution(event.execution.executionId);
+          // Reset all node statuses to idle
+          const { nodes: allNodes, updateNode: updNode } = useWorkflowStore.getState();
+          for (const n of allNodes) {
+            updNode(n.id, { data: { ...n.data, status: 'idle' } } as any);
+          }
           break;
 
         case 'node:started':
@@ -44,28 +61,31 @@ export function useWebSocket() {
             output: {},
             startedAt: new Date().toISOString(),
           });
+          syncNodeStatus(event.nodeId, 'running');
           addLog({
             timestamp: new Date().toISOString(),
             level: 'info',
-            message: `Node ${event.nodeId} started`,
+            message: `▶ Node ${event.nodeId.slice(0, 8)} started`,
           });
           break;
 
         case 'node:completed':
           updateNodeResult(event.executionId, event.result);
+          syncNodeStatus(event.result.nodeId, event.result.status);
           addLog({
             timestamp: new Date().toISOString(),
             level: 'info',
-            message: `Node ${event.result.nodeId} completed in ${event.result.duration}ms`,
+            message: `✓ Node ${event.result.nodeId.slice(0, 8)} completed in ${event.result.duration}ms`,
           });
           break;
 
         case 'node:error':
           updateNodeResult(event.executionId, event.result);
+          syncNodeStatus(event.result.nodeId, 'error');
           addLog({
             timestamp: new Date().toISOString(),
             level: 'error',
-            message: `Node ${event.result.nodeId} failed: ${event.result.error}`,
+            message: `✗ Node ${event.result.nodeId.slice(0, 8)} failed: ${event.result.error}`,
           });
           break;
 
@@ -74,7 +94,7 @@ export function useWebSocket() {
           addLog({
             timestamp: new Date().toISOString(),
             level: 'info',
-            message: 'Workflow execution completed successfully',
+            message: '🏁 Workflow execution completed successfully',
           });
           break;
 
@@ -83,7 +103,7 @@ export function useWebSocket() {
           addLog({
             timestamp: new Date().toISOString(),
             level: 'error',
-            message: `Workflow execution failed: ${event.execution.error}`,
+            message: `💥 Workflow execution failed: ${event.execution.error}`,
           });
           break;
 

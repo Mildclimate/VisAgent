@@ -563,10 +563,16 @@ export function getExecution(executionId: string): WorkflowExecution | undefined
     || (db.prepare('SELECT * FROM executions WHERE execution_id = ?').get(executionId) as any);
 }
 
-/** Retry a failed node */
+/** Retry a failed node and resume execution from it */
 export async function retryNode(executionId: string, nodeId: string): Promise<boolean> {
   const execution = runningExecutions.get(executionId);
-  if (!execution) return false;
+  if (!execution) {
+    // Try loading from DB and re-registering
+    const dbExec = db.prepare('SELECT * FROM executions WHERE execution_id = ?').get(executionId) as any;
+    if (!dbExec) return false;
+    // Can't resume a completed execution for now
+    return false;
+  }
 
   const row = db.prepare('SELECT * FROM workflows WHERE id = ?').get(execution.workflowId) as any;
   if (!row) return false;
@@ -575,13 +581,93 @@ export async function retryNode(executionId: string, nodeId: string): Promise<bo
   const node = definition.nodes.find((n) => n.id === nodeId);
   if (!node) return false;
 
-  // Collect context from preceding nodes
+  // Set execution back to running
+  execution.status = 'running';
+  execution.error = undefined;
+
+  // Collect context from preceding successfully executed nodes
   const context = collectNodeContext(execution, definition);
 
+  // Retry the failed node
   const result = await executeNode(node, context, executionId);
   execution.nodeResults[nodeId] = result;
 
-  return result.status === 'success';
+  if (result.status !== 'success') {
+    failExecution(executionId, `Retry of node "${nodeId}" failed: ${result.error}`);
+    return false;
+  }
+
+  // Resume execution from this node's successors
+  const adjacency = new Map<string, string[]>();
+  for (const n of definition.nodes) adjacency.set(n.id, []);
+  for (const edge of definition.edges) {
+    adjacency.get(edge.source)?.push(edge.target);
+  }
+
+  const nodeMap = new Map(definition.nodes.map((n) => [n.id, n]));
+  const visited = new Set(Object.keys(execution.nodeResults));
+  const queue: string[] = [];
+
+  // Determine next nodes
+  if (node.type === 'condition') {
+    const condConfig = node.data.config as ConditionConfig;
+    const branch = result.output.nextBranch as string;
+    const nextId = branch === 'true' ? condConfig.trueBranch : condConfig.falseBranch;
+    if (nextId) queue.push(nextId);
+  } else {
+    const targets = adjacency.get(nodeId) || [];
+    for (const targetId of targets) {
+      if (!visited.has(targetId)) queue.push(targetId);
+    }
+  }
+
+  // Continue BFS from successors
+  let updatedContext = { ...context, ...result.output };
+  while (queue.length > 0) {
+    if (execution.status !== 'running') break;
+
+    const nextId = queue.shift()!;
+    if (visited.has(nextId)) continue;
+    visited.add(nextId);
+
+    const nextNode = nodeMap.get(nextId);
+    if (!nextNode) continue;
+
+    execution.currentNodeId = nextId;
+
+    const nextResult = await executeNode(nextNode, updatedContext, executionId);
+    execution.nodeResults[nextId] = nextResult;
+
+    if (nextResult.status === 'error') {
+      failExecution(executionId, `Node "${nextId}" failed after retry: ${nextResult.error}`);
+      return true; // Retry itself succeeded, but subsequent node failed
+    }
+
+    if (nextNode.type !== 'condition') {
+      updatedContext = { ...updatedContext, ...nextResult.output };
+    }
+
+    if (nextNode.type === 'end') continue;
+
+    if (nextNode.type === 'condition') {
+      const condConfig = nextNode.data.config as ConditionConfig;
+      const branch = nextResult.output.nextBranch as string;
+      const skipId = branch === 'true' ? condConfig.trueBranch : condConfig.falseBranch;
+      if (skipId && !visited.has(skipId)) queue.push(skipId);
+    } else {
+      const targets = adjacency.get(nextId) || [];
+      for (const targetId of targets) {
+        if (!visited.has(targetId)) queue.push(targetId);
+      }
+    }
+  }
+
+  // If we got here without errors, complete
+  if (execution.status === 'running') {
+    completeExecution(executionId);
+  }
+
+  return true;
 }
 
 function collectNodeContext(

@@ -85,11 +85,11 @@
 - [x] 节点间上下文传递与模板插值（`$ref.nodeId.field` 引用 + `{{nested.path}}` 模板）
 - [x] REST API 运行端点（`POST /api/workflows/:id/run` + 执行状态查询 + 取消）
 
-### Phase 4 — 实时监控
-- [ ] WebSocket 执行事件推送（node:started/completed/error）
-- [ ] Monitor Panel 实时日志展示
-- [ ] 节点执行状态可视化（颜色变化、动画）
-- [ ] 断点重试机制
+### Phase 4 — 实时监控 ✅ (已完成)
+- [x] WebSocket 执行事件推送（node:started → running / completed → success / error → 红色）
+- [x] Monitor Panel 实时日志展示 + 执行进度条（彩色分段）
+- [x] 节点执行状态可视化——画布节点颜色实时变化（蓝色=运行中 / 绿色=成功 / 红色=失败 / 灰色=跳过）
+- [x] 断点重试机制——失败节点可悬停点击重试，重试成功后自动继续执行后续节点
 
 ### Phase 5 — Function Calling 集成
 - [ ] MCP 协议 Tool 注册与发现
