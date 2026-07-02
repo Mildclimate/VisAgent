@@ -4,6 +4,9 @@ import EndNode from './EndNode';
 import LLMCallNode from './LLMCallNode';
 import ToolExecNode from './ToolExecNode';
 import ConditionNode from './ConditionNode';
+import CodeExecNode from './CodeExecNode';
+import LoopNode from './LoopNode';
+import ParallelNode from './ParallelNode';
 
 export const nodeTypes: NodeTypes = {
   start: StartNode,
@@ -11,8 +14,7 @@ export const nodeTypes: NodeTypes = {
   'llm-call': LLMCallNode,
   'tool-exec': ToolExecNode,
   condition: ConditionNode,
-  // Reuse existing nodes for these types with default rendering
-  'code-exec': LLMCallNode,
-  loop: LLMCallNode,
-  parallel: LLMCallNode,
+  'code-exec': CodeExecNode,
+  loop: LoopNode,
+  parallel: ParallelNode,
 };

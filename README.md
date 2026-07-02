@@ -71,11 +71,11 @@
 - [x] 前端 React + ReactFlow 基础布局
 - [x] SQLite 数据库表设计
 
-### Phase 2 — 工作流编辑器 (进行中)
-- [ ] ReactFlow 完整节点类型（LLM Call, Tool Exec, Condition, Loop, Parallel, Code Exec）
-- [ ] 节点配置面板（属性编辑）
-- [ ] 工作流保存/加载（REST API 联调）
-- [ ] 画布操作增强（撤销/重做、缩放、小地图）
+### Phase 2 — 工作流编辑器 ✅ (已完成)
+- [x] ReactFlow 完整节点类型（LLM Call, Tool Exec, Condition, Loop, Parallel, Code Exec）
+- [x] 节点配置面板（属性编辑）— 每种节点类型都有专用配置面板
+- [x] 工作流保存/加载（REST API 联调）— WorkflowList 弹窗管理
+- [x] 画布操作增强（撤销/重做 Ctrl+Z / Ctrl+Shift+Z、缩放、小地图）
 
 ### Phase 3 — MCP Server + 执行引擎
 - [ ] 工作流 DAG 拓扑排序执行

@@ -4,6 +4,7 @@ import '@xyflow/react/dist/style.css';
 import Header from './components/layout/Header';
 import Sidebar from './components/layout/Sidebar';
 import WorkflowEditor from './components/editor/WorkflowEditor';
+import WorkflowList from './components/layout/WorkflowList';
 import MonitorPanel from './components/monitor/MonitorPanel';
 import ToolManager from './components/toolbox/ToolManager';
 
@@ -42,6 +43,9 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {/* Workflow save/load dialog */}
+      <WorkflowList />
     </div>
   );
 }

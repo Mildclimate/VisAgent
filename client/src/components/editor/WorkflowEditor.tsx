@@ -1,4 +1,4 @@
-import { useCallback, useRef, DragEvent } from 'react';
+import { useCallback, useRef, useState, useEffect, DragEvent } from 'react';
 import {
   ReactFlow,
   Background,
@@ -14,13 +14,19 @@ import {
   type OnNodesChange,
   type OnEdgesChange,
 } from '@xyflow/react';
+import { Undo2, Redo2 } from 'lucide-react';
 import { useWorkflowStore } from '../../stores/workflowStore';
+import { nodeTypes } from './nodes/nodeTypes';
+import NodeConfigPanel from './NodeConfigPanel';
 
 function generateId(): string {
   return crypto.randomUUID();
 }
-import { nodeTypes } from './nodes/nodeTypes';
-import NodeConfigPanel from './NodeConfigPanel';
+
+interface Snapshot {
+  nodes: Node[];
+  edges: Edge[];
+}
 
 export default function WorkflowEditor() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
@@ -36,16 +42,77 @@ export default function WorkflowEditor() {
   const [nodes, setNodesLocal, onNodesChange] = useNodesState(storeNodes as unknown as Node[]);
   const [edges, setEdgesLocal, onEdgesChange] = useEdgesState(storeEdges as Edge[]);
 
-  // Sync local state to store
+  // Undo/Redo history
+  const [history, setHistory] = useState<Snapshot[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const historyInitialized = useRef(false);
+
+  // Initialize history with current state
+  useEffect(() => {
+    if (!historyInitialized.current && nodes.length >= 0) {
+      setHistory([{ nodes: [...nodes], edges: [...edges] }]);
+      setHistoryIndex(0);
+      historyInitialized.current = true;
+    }
+  }, []);
+
+  const pushHistory = useCallback((newNodes: Node[], newEdges: Edge[]) => {
+    setHistory((prev) => {
+      const trimmed = prev.slice(0, historyIndex + 1);
+      return [...trimmed.slice(-49), { nodes: [...newNodes], edges: [...newEdges] }];
+    });
+    setHistoryIndex((prev) => Math.min(prev + 1, 49));
+  }, [historyIndex]);
+
+  // Sync local state to store AND push history
   const syncToStore = useCallback(
-    (updatedNodes: Node[], updatedEdges: Edge[]) => {
+    (updatedNodes: Node[], updatedEdges: Edge[], recordHistory = true) => {
       setNodesLocal(updatedNodes);
       setEdgesLocal(updatedEdges);
       setNodes(updatedNodes as any);
       setEdges(updatedEdges as any);
+      if (recordHistory) {
+        pushHistory(updatedNodes, updatedEdges);
+      }
     },
-    [setNodes, setEdges],
+    [setNodes, setEdges, pushHistory],
   );
+
+  // Undo
+  const undo = useCallback(() => {
+    if (historyIndex <= 0) return;
+    const prev = history[historyIndex - 1];
+    setHistoryIndex(historyIndex - 1);
+    syncToStore(prev.nodes, prev.edges, false);
+  }, [history, historyIndex, syncToStore]);
+
+  // Redo
+  const redo = useCallback(() => {
+    if (historyIndex >= history.length - 1) return;
+    const next = history[historyIndex + 1];
+    setHistoryIndex(historyIndex + 1);
+    syncToStore(next.nodes, next.edges, false);
+  }, [history, historyIndex, syncToStore]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && e.shiftKey) {
+        e.preventDefault();
+        redo();
+      }
+      // Delete key
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeId) {
+        // Handled by store's deleteNode
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [undo, redo, selectedNodeId]);
 
   const onConnect: OnConnect = useCallback(
     (connection: Connection) => {
@@ -63,10 +130,6 @@ export default function WorkflowEditor() {
   const handleNodesChange: OnNodesChange = useCallback(
     (changes) => {
       onNodesChange(changes);
-      // Sync after a brief delay to let ReactFlow update
-      setTimeout(() => {
-        // We need to get the latest nodes from DOM/state
-      }, 0);
     },
     [onNodesChange],
   );
@@ -123,8 +186,33 @@ export default function WorkflowEditor() {
     selectNode(null);
   }, [selectNode]);
 
+  // Track node drag end for history
+  const onNodeDragStop = useCallback(() => {
+    pushHistory(nodes, edges);
+  }, [nodes, edges, pushHistory]);
+
   return (
-    <div ref={reactFlowWrapper} className="w-full h-full">
+    <div ref={reactFlowWrapper} className="w-full h-full relative">
+      {/* Undo/Redo toolbar */}
+      <div className="absolute top-3 left-3 z-10 flex gap-1">
+        <button
+          onClick={undo}
+          disabled={historyIndex <= 0}
+          className="p-2 rounded-md bg-surface-800 border border-surface-600 text-surface-300 hover:text-white hover:bg-surface-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          title="Undo (Ctrl+Z)"
+        >
+          <Undo2 size={15} />
+        </button>
+        <button
+          onClick={redo}
+          disabled={historyIndex >= history.length - 1}
+          className="p-2 rounded-md bg-surface-800 border border-surface-600 text-surface-300 hover:text-white hover:bg-surface-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          title="Redo (Ctrl+Shift+Z)"
+        >
+          <Redo2 size={15} />
+        </button>
+      </div>
+
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -135,10 +223,12 @@ export default function WorkflowEditor() {
         onDrop={onDrop}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
+        onNodeDragStop={onNodeDragStop}
         nodeTypes={nodeTypes}
         fitView
         snapToGrid
         snapGrid={[16, 16]}
+        deleteKeyCode={['Backspace', 'Delete']}
         defaultEdgeOptions={{
           type: 'smoothstep',
           animated: true,

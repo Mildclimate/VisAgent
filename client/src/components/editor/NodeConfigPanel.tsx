@@ -1,6 +1,6 @@
 import { X, Trash2 } from 'lucide-react';
 import { useWorkflowStore } from '../../stores/workflowStore';
-import type { LLMCallConfig, ToolExecConfig, ConditionConfig, CodeExecConfig } from '@visagent/shared';
+import type { LLMCallConfig, ToolExecConfig, ConditionConfig, CodeExecConfig, LoopConfig, ParallelConfig } from '@visagent/shared';
 
 export default function NodeConfigPanel() {
   const { nodes, selectedNodeId, selectNode, updateNode, deleteNode } = useWorkflowStore();
@@ -67,9 +67,19 @@ export default function NodeConfigPanel() {
         const config = node.data.config as ToolExecConfig;
         return (
           <div className="space-y-3">
-            <Field label="Tool Name" value={config.toolName} onChange={(v) => handleConfigChange('toolName', v)} />
+            <Field label="Tool Name" value={config.toolName} onChange={(v) => handleConfigChange('toolName', v)} placeholder="e.g. web_search" />
+            <div className="space-y-1">
+              <label className="text-xs text-surface-400">Static Parameters (JSON)</label>
+              <textarea
+                className="w-full bg-surface-900 border border-surface-600 rounded px-3 py-2 text-xs text-white font-mono resize-y min-h-[60px]"
+                value={JSON.stringify(config.params || {}, null, 2)}
+                onChange={(e) => {
+                  try { handleConfigChange('params', JSON.parse(e.target.value)); } catch {}
+                }}
+              />
+            </div>
             <div className="text-xs text-surface-500">
-              Parameters and injections configured in advanced view.
+              Use <code className="text-primary-400">$ref.nodeId.field</code> in paramInjection for dynamic values.
             </div>
           </div>
         );
@@ -149,6 +159,74 @@ export default function NodeConfigPanel() {
         );
       }
 
+      case 'loop': {
+        const config = node.data.config as LoopConfig;
+        return (
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label className="text-xs text-surface-400">Iterate Expression</label>
+              <input
+                className="w-full bg-surface-900 border border-surface-600 rounded px-3 py-2 text-sm text-white font-mono outline-none focus:border-primary-500"
+                value={config.iterateExpression}
+                onChange={(e) => handleConfigChange('iterateExpression', e.target.value)}
+                placeholder="ctx.items"
+              />
+              <p className="text-[10px] text-surface-500">Expression that returns an array to iterate over.</p>
+            </div>
+            <Field
+              label="Max Iterations"
+              type="number"
+              value={String(config.maxIterations)}
+              onChange={(v) => handleConfigChange('maxIterations', parseInt(v))}
+            />
+            <div className="text-xs text-surface-500">
+              Connect child nodes to form the loop body. They will execute for each iteration.
+            </div>
+          </div>
+        );
+      }
+
+      case 'parallel': {
+        const config = node.data.config as ParallelConfig;
+        return (
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label className="text-xs text-surface-400">Strategy</label>
+              <select
+                className="w-full bg-surface-900 border border-surface-600 rounded px-3 py-2 text-sm text-white"
+                value={config.strategy}
+                onChange={(e) => handleConfigChange('strategy', e.target.value)}
+              >
+                <option value="all">Wait All — 等待所有分支完成</option>
+                <option value="race">Race — 任一分支完成即继续</option>
+              </select>
+            </div>
+            <div className="text-xs text-surface-500">
+              Connect multiple outgoing edges to different branches. Each branch executes in parallel.
+            </div>
+          </div>
+        );
+      }
+
+      case 'end': {
+        return (
+          <div className="space-y-3">
+            <div className="text-xs text-surface-400">
+              Workflow exit point. The output from preceding nodes will be collected as the final result.
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-surface-400">Output Fields (comma-separated)</label>
+              <input
+                className="w-full bg-surface-900 border border-surface-600 rounded px-3 py-2 text-sm text-white outline-none focus:border-primary-500"
+                placeholder="result, summary"
+                defaultValue=""
+              />
+              <p className="text-[10px] text-surface-500">Specify which context fields to include in the final output.</p>
+            </div>
+          </div>
+        );
+      }
+
       default:
         return <p className="text-sm text-surface-500">No configurable fields for this node type.</p>;
     }
@@ -195,11 +273,13 @@ function Field({
   label,
   value,
   type = 'text',
+  placeholder,
   onChange,
 }: {
   label: string;
   value: string;
   type?: string;
+  placeholder?: string;
   onChange: (value: string) => void;
 }) {
   return (
@@ -209,6 +289,7 @@ function Field({
         type={type}
         className="w-full bg-surface-900 border border-surface-600 rounded px-3 py-2 text-sm text-white outline-none focus:border-primary-500"
         value={value}
+        placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
       />
     </div>

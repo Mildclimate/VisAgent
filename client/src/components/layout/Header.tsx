@@ -12,7 +12,7 @@ interface HeaderProps {
 }
 
 export default function Header({ workflowName, onNameChange, rightPanel, onTogglePanel }: HeaderProps) {
-  const { workflow, isDirty } = useWorkflowStore();
+  const { workflow, isDirty, setShowWorkflowList } = useWorkflowStore();
   const { startExecution } = useWebSocket();
 
   const handleRun = () => {
@@ -56,7 +56,7 @@ export default function Header({ workflowName, onNameChange, rightPanel, onToggl
       {/* Actions */}
       <div className="flex items-center gap-1">
         <button
-          onClick={() => {/* TODO: save */}}
+          onClick={() => setShowWorkflowList(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md hover:bg-surface-700 text-surface-300 hover:text-white transition-colors"
         >
           <Save size={15} />

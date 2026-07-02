@@ -7,6 +7,8 @@ interface WorkflowState {
   edges: WorkflowEdge[];
   selectedNodeId: string | null;
   isDirty: boolean;
+  workflowList: Array<{ id: string; name: string; updatedAt: string }>;
+  showWorkflowList: boolean;
 
   // Actions
   setWorkflow: (wf: WorkflowDefinition) => void;
@@ -19,6 +21,8 @@ interface WorkflowState {
   markDirty: () => void;
   markClean: () => void;
   reset: () => void;
+  setWorkflowList: (list: Array<{ id: string; name: string; updatedAt: string }>) => void;
+  setShowWorkflowList: (show: boolean) => void;
 }
 
 export const useWorkflowStore = create<WorkflowState>((set) => ({
@@ -27,6 +31,8 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
   edges: [],
   selectedNodeId: null,
   isDirty: false,
+  workflowList: [],
+  showWorkflowList: false,
 
   setWorkflow: (wf) =>
     set({ workflow: wf, nodes: wf.nodes, edges: wf.edges, isDirty: false }),
@@ -64,4 +70,7 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
       selectedNodeId: null,
       isDirty: false,
     }),
+
+  setWorkflowList: (list) => set({ workflowList: list }),
+  setShowWorkflowList: (show) => set({ showWorkflowList: show }),
 }));
