@@ -77,12 +77,13 @@
 - [x] 工作流保存/加载（REST API 联调）— WorkflowList 弹窗管理
 - [x] 画布操作增强（撤销/重做 Ctrl+Z / Ctrl+Shift+Z、缩放、小地图）
 
-### Phase 3 — MCP Server + 执行引擎
-- [ ] 工作流 DAG 拓扑排序执行
-- [ ] LLM 调用节点（支持 OpenAI 兼容 API）
-- [ ] Tool 执行节点（从 Tool Registry 查找并执行）
-- [ ] Condition 条件分支路由
-- [ ] 节点间上下文传递与模板插值
+### Phase 3 — MCP Server + 执行引擎 ✅ (已完成)
+- [x] 工作流 DAG 条件感知图遍历执行（BFS，支持条件分支路由 + 跳过未走分支）
+- [x] LLM 调用节点（OpenAI 兼容 API，支持 DeepSeek/通义千问/Ollama）
+- [x] Tool 执行节点（从 Tool Registry DB 查找并执行，支持自定义 JS Handler）
+- [x] Condition 条件分支路由（表达式求值 + trueBranch/falseBranch 跳转）
+- [x] 节点间上下文传递与模板插值（`$ref.nodeId.field` 引用 + `{{nested.path}}` 模板）
+- [x] REST API 运行端点（`POST /api/workflows/:id/run` + 执行状态查询 + 取消）
 
 ### Phase 4 — 实时监控
 - [ ] WebSocket 执行事件推送（node:started/completed/error）

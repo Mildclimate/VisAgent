@@ -1,6 +1,7 @@
 import { Save, Play, Monitor, Wrench } from 'lucide-react';
 import { useWorkflowStore } from '../../stores/workflowStore';
 import { useWebSocket } from '../../hooks/useWebSocket';
+import { api } from '../../lib/api';
 
 type RightPanel = 'monitor' | 'tools' | null;
 
@@ -12,21 +13,43 @@ interface HeaderProps {
 }
 
 export default function Header({ workflowName, onNameChange, rightPanel, onTogglePanel }: HeaderProps) {
-  const { workflow, isDirty, setShowWorkflowList } = useWorkflowStore();
+  const { workflow, isDirty, nodes, edges, setWorkflow, markClean, setShowWorkflowList } = useWorkflowStore();
   const { startExecution } = useWebSocket();
 
-  const handleRun = () => {
-    if (!workflow) return;
-    const inputs: Record<string, unknown> = {};
+  const handleRun = async () => {
+    // Auto-save before running so the workflow has an ID
+    let wfId = workflow?.id;
+    if (!wfId || isDirty) {
+      try {
+        const payload = {
+          name: workflowName || 'Untitled',
+          description: workflow?.description || '',
+          definition: { nodes, edges, variables: workflow?.variables || {} },
+        };
+        if (wfId) {
+          await api.updateWorkflow(wfId, payload);
+        } else {
+          const created = await api.createWorkflow(payload);
+          wfId = created.id;
+          setWorkflow({ ...created });
+        }
+        markClean();
+      } catch (err: any) {
+        alert(`Save before run failed: ${err.message}`);
+        return;
+      }
+    }
+
     // Collect input from start node config
-    const startNode = workflow.nodes.find((n) => n.type === 'start');
-    if (startNode?.data.config && 'inputSchema' in startNode.data.config) {
-      for (const key of Object.keys(startNode.data.config.inputSchema)) {
+    const inputs: Record<string, unknown> = {};
+    const startNode = nodes.find((n: any) => n.type === 'start');
+    if (startNode?.data?.config && 'inputSchema' in startNode.data.config) {
+      for (const key of Object.keys((startNode.data.config as any).inputSchema)) {
         inputs[key] = prompt(`Enter value for "${key}":`) || '';
       }
     }
 
-    startExecution(workflow.id, inputs);
+    startExecution(wfId!, inputs);
   };
 
   return (

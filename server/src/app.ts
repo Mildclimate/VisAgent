@@ -4,6 +4,7 @@ import { workflowRouter } from './routes/workflow.js';
 import { toolRouter } from './routes/tool.js';
 import { mcpServer } from './mcp/server.js';
 import { db } from './db/index.js';
+import { startExecution, getExecution, cancelExecution } from './engine/executor.js';
 import type { MCPCompletionRequest } from '@visagent/shared';
 import { config } from './config.js';
 
@@ -47,7 +48,35 @@ export function createApp() {
     }
   });
 
-  // Execution history
+  // Execution endpoints
+  // Run a workflow via REST (alternative to WebSocket)
+  app.post('/api/workflows/:id/run', async (req, res) => {
+    try {
+      const inputs = req.body.inputs || {};
+      const execution = await startExecution(req.params.id, inputs);
+      res.status(202).json({ executionId: execution.executionId, status: execution.status });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Get execution status
+  app.get('/api/executions/status/:executionId', (req, res) => {
+    const exec = getExecution(req.params.executionId);
+    if (!exec) {
+      res.status(404).json({ error: 'Execution not found' });
+      return;
+    }
+    res.json(exec);
+  });
+
+  // Cancel a running execution
+  app.post('/api/executions/:executionId/cancel', (req, res) => {
+    const ok = cancelExecution(req.params.executionId);
+    res.json({ success: ok });
+  });
+
+  // Execution history for a workflow
   app.get('/api/executions/:workflowId', (req, res) => {
     const rows = db.prepare(
       'SELECT * FROM executions WHERE workflow_id = ? ORDER BY started_at DESC LIMIT 50'

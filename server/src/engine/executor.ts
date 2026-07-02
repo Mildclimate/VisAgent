@@ -17,47 +17,6 @@ import { config } from '../config.js';
 /** In-memory execution registry */
 const runningExecutions = new Map<string, WorkflowExecution>();
 
-/**
- * Topological sort of nodes for execution order.
- * Returns nodes in execution order, handling branches.
- */
-function topologicalSort(nodes: WorkflowNode[], edges: { source: string; target: string }[]): WorkflowNode[] {
-  const inDegree = new Map<string, number>();
-  const adjacency = new Map<string, string[]>();
-
-  for (const node of nodes) {
-    inDegree.set(node.id, 0);
-    adjacency.set(node.id, []);
-  }
-
-  for (const edge of edges) {
-    adjacency.get(edge.source)?.push(edge.target);
-    inDegree.set(edge.target, (inDegree.get(edge.target) || 0) + 1);
-  }
-
-  const queue: string[] = [];
-  for (const [id, degree] of inDegree) {
-    if (degree === 0) queue.push(id);
-  }
-
-  const sorted: WorkflowNode[] = [];
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    const node = nodeMap.get(current);
-    if (node) sorted.push(node);
-
-    for (const neighbor of adjacency.get(current) || []) {
-      const newDegree = (inDegree.get(neighbor) || 1) - 1;
-      inDegree.set(neighbor, newDegree);
-      if (newDegree === 0) queue.push(neighbor);
-    }
-  }
-
-  return sorted;
-}
-
 /** Execute a single node based on its type */
 async function executeNode(
   node: WorkflowNode,
@@ -282,11 +241,23 @@ function evaluateExpression(expr: string, context: Record<string, unknown>): unk
   return fn(context);
 }
 
-/** Template interpolation: replace {{key}} with context values */
+/** Template interpolation: replace {{key}} or {{nested.key.path}} with context values */
 function interpolateTemplate(template: string, context: Record<string, unknown>): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (_, key) => {
-    return context[key] !== undefined ? String(context[key]) : `{{${key}}}`;
+  return template.replace(/\{\{([^}]+)\}\}/g, (_, path: string) => {
+    const value = resolveDotPath(path.trim(), context);
+    return value !== undefined ? String(value) : `{{${path}}}`;
   });
+}
+
+/** Resolve a dot-separated path against a nested object, e.g. "a.b.c" -> obj.a.b.c */
+function resolveDotPath(path: string, obj: Record<string, unknown>): unknown {
+  const parts = path.split('.');
+  let current: any = obj;
+  for (const part of parts) {
+    if (current == null || typeof current !== 'object') return undefined;
+    current = current[part];
+  }
+  return current;
 }
 
 /** Execute a sandboxed JS handler */
@@ -376,7 +347,7 @@ export async function startExecution(
   return execution;
 }
 
-/** Core workflow execution loop */
+/** Core workflow execution loop - condition-aware graph traversal */
 async function runWorkflow(
   executionId: string,
   definition: WorkflowDefinition,
@@ -394,70 +365,133 @@ async function runWorkflow(
     return;
   }
 
-  // Topological sort
-  const sortedNodes = topologicalSort(nodes, edges);
-
-  // Build adjacency for condition-based routing
+  // Build adjacency: nodeId -> target nodeIds (ordered)
   const adjacency = new Map<string, string[]>();
-  const edgeMap = new Map<string, typeof edges[0]>();
-  for (const edge of edges) {
-    if (!adjacency.has(edge.source)) adjacency.set(edge.source, []);
-    adjacency.get(edge.source)!.push(edge.target);
-    edgeMap.set(`${edge.source}->${edge.target}`, edge);
+  for (const node of nodes) {
+    adjacency.set(node.id, []);
   }
+  for (const edge of edges) {
+    const targets = adjacency.get(edge.source) || [];
+    targets.push(edge.target);
+    adjacency.set(edge.source, targets);
+  }
+
+  // Node lookup
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
   // Context carries data between nodes
   let context: Record<string, unknown> = { ...inputs };
 
-  for (const node of sortedNodes) {
-    if (execution.status !== 'running') break; // Cancelled
+  // BFS-style traversal with condition awareness
+  const visited = new Set<string>();
+  const queue: string[] = [startNode.id];
 
-    execution.currentNodeId = node.id;
+  while (queue.length > 0) {
+    if (execution.status !== 'running') break;
+
+    const nodeId = queue.shift()!;
+    if (visited.has(nodeId)) continue;
+    visited.add(nodeId);
+
+    const node = nodeMap.get(nodeId);
+    if (!node) continue;
+
+    execution.currentNodeId = nodeId;
 
     const result = await executeNode(node, context, executionId);
-    execution.nodeResults[node.id] = result;
+    execution.nodeResults[nodeId] = result;
 
     if (result.status === 'error') {
-      // For now, stop on first error; TODO: configurable error handling
-      failExecution(executionId, `Node "${node.id}" failed: ${result.error}`);
+      failExecution(executionId, `Node "${nodeId}" failed: ${result.error}`);
       return;
     }
 
-    // Update context with node output
-    if (node.type === 'condition') {
-      // Condition node: route based on result
-      const branch = result.output.nextBranch as string;
-      // Skip to the correct branch target
-      const trueTarget = (node.data.config as ConditionConfig).trueBranch;
-      const falseTarget = (node.data.config as ConditionConfig).falseBranch;
-      const skipTo = branch === 'true' ? trueTarget : falseTarget;
-
-      if (skipTo) {
-        // Mark skipped nodes
-        let skipMode = false;
-        for (const n of sortedNodes) {
-          if (n.id === node.id) { skipMode = true; continue; }
-          if (n.id === skipTo) { skipMode = false; continue; }
-          if (skipMode && n.type !== 'end') {
-            execution.nodeResults[n.id] = {
-              nodeId: n.id,
-              status: 'skipped',
-              input: {},
-              output: {},
-              startedAt: new Date().toISOString(),
-            };
-          }
-        }
-        // Jump context to skipTo node's result
-        context = { ...context, ...result.output };
-      }
-    } else {
+    // Update context with node output (for non-condition nodes)
+    if (node.type !== 'condition') {
       context = { ...context, ...result.output };
+    }
+
+    // Determine next nodes based on node type
+    if (node.type === 'condition') {
+      // Condition: route to trueBranch or falseBranch
+      const condConfig = node.data.config as ConditionConfig;
+      const branch = result.output.nextBranch as string;
+      const nextId = branch === 'true' ? condConfig.trueBranch : condConfig.falseBranch;
+
+      if (nextId && !visited.has(nextId)) {
+        queue.push(nextId);
+      }
+
+      // Mark the non-taken branch nodes as skipped
+      const skippedBranch = branch === 'true' ? condConfig.falseBranch : condConfig.trueBranch;
+      if (skippedBranch) {
+        markBranchSkipped(skippedBranch, nodeMap, adjacency, visited, execution);
+      }
+    } else if (node.type === 'end') {
+      // End node: stop traversal
+      continue;
+    } else {
+      // Normal node: follow all outgoing edges
+      const targets = adjacency.get(nodeId) || [];
+      for (const targetId of targets) {
+        if (!visited.has(targetId)) {
+          queue.push(targetId);
+        }
+      }
+    }
+  }
+
+  // Mark any remaining unvisited nodes as skipped
+  for (const node of nodes) {
+    if (!visited.has(node.id) && !execution.nodeResults[node.id]) {
+      execution.nodeResults[node.id] = {
+        nodeId: node.id,
+        status: 'skipped',
+        input: {},
+        output: {},
+        startedAt: new Date().toISOString(),
+      };
     }
   }
 
   // Complete execution
   completeExecution(executionId);
+}
+
+/** Recursively mark all nodes in a branch as skipped */
+function markBranchSkipped(
+  startNodeId: string,
+  nodeMap: Map<string, WorkflowNode>,
+  adjacency: Map<string, string[]>,
+  visited: Set<string>,
+  execution: WorkflowExecution,
+): void {
+  const stack = [startNodeId];
+  const markedLocal = new Set<string>();
+
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (visited.has(id) || markedLocal.has(id)) continue;
+    markedLocal.add(id);
+    visited.add(id); // Mark as visited so main loop skips it
+
+    const node = nodeMap.get(id);
+    if (!node || node.type === 'end') continue;
+
+    execution.nodeResults[id] = {
+      nodeId: id,
+      status: 'skipped',
+      input: {},
+      output: {},
+      startedAt: new Date().toISOString(),
+    };
+
+    // Continue to child nodes
+    const targets = adjacency.get(id) || [];
+    for (const targetId of targets) {
+      stack.push(targetId);
+    }
+  }
 }
 
 function completeExecution(executionId: string): void {
