@@ -48,6 +48,10 @@ export interface LLMCallConfig {
   temperature: number;
   maxTokens: number;
   inputMapping: Record<string, string>; // maps input field -> upstream node output field
+  /** Enable MCP Function Calling: LLM can autonomously call registered tools */
+  enableFunctionCalling?: boolean;
+  /** Max rounds of tool calling before forcing a final response */
+  maxToolCallRounds?: number;
 }
 
 export interface ToolExecConfig {

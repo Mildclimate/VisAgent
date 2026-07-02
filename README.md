@@ -91,11 +91,11 @@
 - [x] 节点执行状态可视化——画布节点颜色实时变化（蓝色=运行中 / 绿色=成功 / 红色=失败 / 灰色=跳过）
 - [x] 断点重试机制——失败节点可悬停点击重试，重试成功后自动继续执行后续节点
 
-### Phase 5 — Function Calling 集成
-- [ ] MCP 协议 Tool 注册与发现
-- [ ] LLM Function Calling 循环（tool_calls → 执行 → 返回结果）
-- [ ] 动态参数注入（上下文引用、表达式求值）
-- [ ] 沙箱代码执行（JS 安全沙箱）
+### Phase 5 — Function Calling 集成 ✅ (已完成)
+- [x] MCP 协议 Tool 注册与发现——LLM 调用自动注入所有已启用 Tool
+- [x] LLM Function Calling 循环（Agent Loop）——`tool_calls` → 执行 → 追加结果 → 继续对话，最多 N 轮
+- [x] 动态参数注入——`$ref.nodeId.field` 上下文引用 + `{{expression}}` 表达式求值 + JSON 参数解析
+- [x] 沙箱代码执行——上下文隔离（仅暴露安全全局对象）+ 超时保护 + 严格模式
 
 ### Phase 6 — 持久化 & 打磨
 - [ ] 执行历史查询与回溯

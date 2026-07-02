@@ -59,6 +59,34 @@ export default function NodeConfigPanel() {
                 placeholder="Use {{variable}} for template interpolation"
               />
             </div>
+
+            {/* Function Calling options */}
+            <div className="border-t border-surface-700 pt-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-surface-400">Function Calling (MCP Tools)</label>
+                <button
+                  onClick={() => handleConfigChange('enableFunctionCalling', !(config.enableFunctionCalling !== false))}
+                  className={`w-9 h-5 rounded-full transition-colors relative ${
+                    config.enableFunctionCalling !== false ? 'bg-primary-500' : 'bg-surface-600'
+                  }`}
+                >
+                  <div className={`w-4 h-4 bg-white rounded-full absolute top-0.5 transition-transform ${
+                    config.enableFunctionCalling !== false ? 'translate-x-4' : 'translate-x-0.5'
+                  }`} />
+                </button>
+              </div>
+              {config.enableFunctionCalling !== false && (
+                <Field
+                  label="Max Tool Call Rounds"
+                  type="number"
+                  value={String(config.maxToolCallRounds || 5)}
+                  onChange={(v) => handleConfigChange('maxToolCallRounds', parseInt(v))}
+                />
+              )}
+              <p className="text-[10px] text-surface-500">
+                When enabled, the LLM can autonomously call registered tools and process results in a multi-turn loop.
+              </p>
+            </div>
           </div>
         );
       }

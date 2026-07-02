@@ -57,6 +57,8 @@ const nodeTemplates: NodeTemplate[] = [
         temperature: 0.7,
         maxTokens: 4096,
         inputMapping: {},
+        enableFunctionCalling: true,
+        maxToolCallRounds: 5,
       },
     },
   },

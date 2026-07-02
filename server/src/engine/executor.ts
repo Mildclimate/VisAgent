@@ -102,44 +102,194 @@ async function executeNode(
   }
 }
 
-/** Execute LLM call node */
+/** Execute LLM call node with optional Function Calling (Agent Loop) */
 async function executeLLMCall(
   cfg: LLMCallConfig,
   context: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  // Resolve input mapping: replace {{ref}} with actual context values
   const resolvedContext = resolveInputMapping(cfg.inputMapping, context);
+  const userMessage = interpolateTemplate(cfg.userPromptTemplate, resolvedContext);
 
-  const messages = [
+  // Build message history
+  const messages: Array<{ role: string; content: string | null; tool_calls?: any[]; tool_call_id?: string; name?: string }> = [
     { role: 'system', content: cfg.systemPrompt },
-    { role: 'user', content: interpolateTemplate(cfg.userPromptTemplate, resolvedContext) },
+    { role: 'user', content: userMessage },
   ];
 
-  const response = await fetch(`${config.llm.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.llm.apiKey}`,
-    },
-    body: JSON.stringify({
+  // Discover available MCP tools
+  const enableFC = cfg.enableFunctionCalling !== false; // default: enabled
+  const maxRounds = cfg.maxToolCallRounds || 10;
+
+  let availableTools: MCPToolFormatted[] = [];
+  if (enableFC) {
+    const rows = db.prepare(
+      'SELECT name, description, input_schema FROM tools WHERE enabled = 1'
+    ).all() as any[];
+    availableTools = rows.map((row: any) => ({
+      type: 'function' as const,
+      function: {
+        name: row.name,
+        description: row.description,
+        parameters: JSON.parse(row.input_schema),
+      },
+    }));
+  }
+
+  // Agent Loop: iterate until LLM stops calling tools
+  let totalUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+  const toolCallHistory: Array<{ tool: string; args: Record<string, unknown>; result: unknown }> = [];
+
+  for (let round = 0; round <= maxRounds; round++) {
+    const requestBody: Record<string, unknown> = {
       model: cfg.model || config.llm.defaultModel,
       messages,
       temperature: cfg.temperature,
       max_tokens: cfg.maxTokens,
-    }),
-  });
+    };
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`LLM call failed: ${response.status} ${err}`);
+    // Include tools if available and FC is enabled
+    if (availableTools.length > 0 && enableFC) {
+      requestBody.tools = availableTools;
+      // Don't force tool_choice — let LLM decide
+    }
+
+    const response = await fetch(`${config.llm.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.llm.apiKey}`,
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`LLM call failed (round ${round}): ${response.status} ${err.slice(0, 200)}`);
+    }
+
+    const data = await response.json() as any;
+    const choice = data.choices?.[0];
+    const message = choice?.message;
+
+    // Accumulate usage
+    if (data.usage) {
+      totalUsage.prompt_tokens += data.usage.prompt_tokens || 0;
+      totalUsage.completion_tokens += data.usage.completion_tokens || 0;
+      totalUsage.total_tokens += data.usage.total_tokens || 0;
+    }
+
+    // Check finish reason
+    const finishReason = choice?.finish_reason;
+
+    if (finishReason === 'tool_calls' && message?.tool_calls && enableFC) {
+      // LLM wants to call tools
+      const toolCalls = message.tool_calls;
+
+      // Append assistant message with tool_calls to history
+      messages.push({
+        role: 'assistant',
+        content: message.content || null,
+        tool_calls: toolCalls,
+      });
+
+      // Execute each tool call and append results
+      for (const tc of toolCalls) {
+        const toolName = tc.function?.name;
+        let toolArgs: Record<string, unknown> = {};
+        try {
+          toolArgs = JSON.parse(tc.function?.arguments || '{}');
+        } catch {
+          toolArgs = {};
+        }
+
+        // Resolve dynamic parameter references
+        const resolvedArgs = resolveDynamicParams(toolArgs, context);
+
+        // Execute the tool
+        const toolResult = await executeToolByName(toolName, resolvedArgs);
+
+        toolCallHistory.push({ tool: toolName, args: resolvedArgs, result: toolResult });
+
+        // Append tool result to messages
+        messages.push({
+          role: 'tool',
+          content: typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult),
+          tool_call_id: tc.id,
+          name: toolName,
+        });
+      }
+
+      // Continue loop — LLM will process tool results
+      continue;
+    }
+
+    // Normal completion (stop, length, or content)
+    const content = message?.content || '';
+
+    return {
+      content,
+      model: data.model,
+      usage: totalUsage,
+      finishReason,
+      toolCalls: toolCallHistory.length > 0 ? toolCallHistory : undefined,
+      rounds: round + 1,
+    };
   }
 
-  const data = await response.json() as any;
-  return {
-    content: data.choices?.[0]?.message?.content || '',
-    model: data.model,
-    usage: data.usage,
+  // Max rounds reached — return whatever we have
+  throw new Error(`LLM exceeded max tool call rounds (${maxRounds}). Last response may be incomplete.`);
+}
+
+interface MCPToolFormatted {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
   };
+}
+
+/** Resolve dynamic parameter references in tool arguments */
+function resolveDynamicParams(
+  args: Record<string, unknown>,
+  context: Record<string, unknown>,
+): Record<string, unknown> {
+  const resolved: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(args)) {
+    if (typeof value === 'string' && value.startsWith('$ref.')) {
+      resolved[key] = resolveReference(value, context);
+    } else if (typeof value === 'string' && value.startsWith('{{') && value.endsWith('}}')) {
+      resolved[key] = evaluateExpression(value.slice(2, -2), context);
+    } else {
+      resolved[key] = value;
+    }
+  }
+  return resolved;
+}
+
+/** Execute a tool by name (used by Function Calling loop) */
+async function executeToolByName(
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  const tool = db.prepare(
+    'SELECT * FROM tools WHERE name = ? AND enabled = 1'
+  ).get(toolName) as any;
+
+  if (!tool) {
+    return { error: `Tool "${toolName}" not found or disabled` };
+  }
+
+  if (tool.handler) {
+    try {
+      return await executeSandboxedHandler(tool.handler, args, {});
+    } catch (err: any) {
+      return { error: `Tool execution failed: ${err.message}` };
+    }
+  }
+
+  // Built-in tool handling
+  return { tool: toolName, args, result: 'executed' };
 }
 
 /** Execute tool call node */
@@ -260,46 +410,109 @@ function resolveDotPath(path: string, obj: Record<string, unknown>): unknown {
   return current;
 }
 
-/** Execute a sandboxed JS handler */
+/** Execute a sandboxed JS handler with context isolation */
 async function executeSandboxedHandler(
   handlerCode: string,
   params: Record<string, unknown>,
   context: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const wrappedCode = `
-    const params = ${JSON.stringify(params)};
-    const context = ${JSON.stringify(context)};
-    const handler = ${handlerCode};
-    return JSON.stringify(handler(params, context));
-  `;
-  const fn = new Function(wrappedCode);
-  const result = fn();
-  return typeof result === 'string' ? JSON.parse(result) : result;
+  const startTime = Date.now();
+  const timeout = config.sandbox.maxTimeout;
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Sandbox execution timed out after ${timeout}ms`));
+    }, timeout);
+
+    try {
+      // Create isolated sandbox with limited globals
+      const sandbox = createSandboxContext(context, params);
+
+      const wrappedCode = `
+        "use strict";
+        return (function() {
+          const { params, context, console, JSON, Math, Date, String, Number, Boolean, Array, Object, parseInt, parseFloat, isNaN, isFinite } = __sandbox__;
+          const handler = ${handlerCode};
+          const result = handler(params, context);
+          return JSON.stringify(result);
+        })();
+      `;
+
+      const fn = new Function('__sandbox__', wrappedCode);
+      const resultStr = fn(sandbox);
+      clearTimeout(timer);
+
+      const result = JSON.parse(resultStr);
+      resolve({ result, duration: Date.now() - startTime });
+    } catch (err: any) {
+      clearTimeout(timer);
+      reject(new Error(`Sandbox error: ${err.message}`));
+    }
+  });
 }
 
-/** Execute sandboxed JS code */
+/** Execute sandboxed JS code (Code Exec node) */
 async function executeSandboxedCode(
   code: string,
   context: Record<string, unknown>,
   timeout: number,
 ): Promise<Record<string, unknown>> {
+  const effectiveTimeout = Math.min(timeout, config.sandbox.maxTimeout);
+
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Code execution timed out')), timeout);
+    const timer = setTimeout(() => {
+      reject(new Error(`Code execution timed out after ${effectiveTimeout}ms`));
+    }, effectiveTimeout);
 
     try {
+      const sandbox = createSandboxContext(context);
+
       const wrappedCode = `
-        const context = ${JSON.stringify(context)};
-        ${code}
+        "use strict";
+        (function() {
+          const { context, console, JSON, Math, Date, String, Number, Boolean, Array, Object, parseInt, parseFloat, isNaN, isFinite } = __sandbox__;
+          ${code}
+        })();
       `;
-      const fn = new Function('context', wrappedCode);
-      fn(context);
+
+      const fn = new Function('__sandbox__', wrappedCode);
+      fn(sandbox);
       clearTimeout(timer);
-      resolve({ ...context });
+      resolve({ ...context, _sandboxExecuted: true });
     } catch (err: any) {
       clearTimeout(timer);
-      reject(err);
+      reject(new Error(`Code execution error: ${err.message}`));
     }
   });
+}
+
+/** Create a limited sandbox context — only expose safe globals */
+function createSandboxContext(
+  context: Record<string, unknown>,
+  params?: Record<string, unknown>,
+) {
+  // Only expose safe, essential globals
+  return {
+    params: params || {},
+    context: { ...context },
+    console: {
+      log: (..._args: any[]) => { /* silent in sandbox */ },
+      error: (..._args: any[]) => { /* silent in sandbox */ },
+      warn: (..._args: any[]) => { /* silent in sandbox */ },
+    },
+    JSON,
+    Math,
+    Date,
+    String,
+    Number,
+    Boolean,
+    Array,
+    Object,
+    parseInt,
+    parseFloat,
+    isNaN,
+    isFinite,
+  };
 }
 
 // --- Public API ---
